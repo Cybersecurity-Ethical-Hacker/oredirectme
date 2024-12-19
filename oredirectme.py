@@ -31,7 +31,7 @@ init(autoreset=True)
 # ------------------------------------------------------------
 # Default Configuration Constants
 # ------------------------------------------------------------
-MAX_CONCURRENT_CONNECTIONS: int = 20
+MAX_CONCURRENT_CONNECTIONS: int = 18
 DEFAULT_RATE_LIMIT: int = 100
 MAX_URL_LENGTH: int = 2083
 MAX_PARAM_LENGTH: int = 1000
