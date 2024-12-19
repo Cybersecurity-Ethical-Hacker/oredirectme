@@ -40,7 +40,7 @@
    pipx install packaging
    ```
 
-**If you're using an older version or a different Linux distribution, you can install them using pip:**
+**If you're using an older Kali Linux version or a different Linux distribution ensure that you have Python 3.8+ installed. Then install the required dependencies using pip:**
 
    ```bash
    pip install -r requirements.txt
