@@ -9,8 +9,7 @@
 🚀 ORedirectMe is a robust and efficient tool designed to detect **Open Redirect** vulnerabilities in web applications. It scans URLs with parameters, injects various payloads, and validates whether redirections occur to external domains, indicating potential security issues.
 
 ## 📸 Screenshot:
-![oredirectme](https://github.com/user-attachments/assets/367c8535-2a0e-4f43-950c-c9b6a4132f48)
-
+![oredirectme](https://github.com/user-attachments/assets/f2f00e53-0b8c-4af9-9880-97cd26e0e8af)
 
 ## 🌟 Features
 
