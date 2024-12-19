@@ -1,0 +1,4 @@
+tldextract>=5.0.0
+colorama>=0.4.6
+tqdm>=4.65.0
+packaging>=23.0

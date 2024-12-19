@@ -1,0 +1,10 @@
+https://google.com
+////%5clocaldomain.pw
+https://%09/localdomain.pw
+//%09/example.com
+/%5Cgoogle.com
+////localdomain.pw/%2f%2e%2e
+////www.whitelisteddomain.tld@localdomain.pw/%2f%2e%2e
+////localdomain.pw//
+///www.whitelisteddomain.tld@localdomain.pw//
+http://google.com%2f%2f.google.com/
