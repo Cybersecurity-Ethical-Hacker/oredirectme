@@ -6,7 +6,7 @@
 [![GitHub Stars](https://img.shields.io/github/stars/Cybersecurity-Ethical-Hacker/oredirectme.svg)](https://github.com/Cybersecurity-Ethical-Hacker/oredirectme/stargazers)
 [![Contributions Welcome](https://img.shields.io/badge/Contributions-Welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-🚀 ORedirectMe is a robust and efficient tool designed to detect **Open Redirect** vulnerabilities in web applications. It scans URLs with parameters, injects various payloads, and validates whether redirections occur to external domains, indicating potential security issues.
+🚀 ORedirectMe is a robust and efficient tool designed to detect **Open Redirect** vulnerabilities in web applications. It scans URLs with parameters, injects various payloads, and validates whether redirections occur to external domains, indicating Open Redirect security issues.
 
 ## 📸 Screenshot:
 ![oredirectme](https://github.com/user-attachments/assets/f2f00e53-0b8c-4af9-9880-97cd26e0e8af)
@@ -16,11 +16,11 @@
 - **⚡ High Performance**: Utilizes asynchronous programming and multi-threading to efficiently scan large numbers of URLs.
 - **🔍 Advanced Validation**: Accurately detects open redirects by comparing registered domains and normalizing URLs.
 - **🛡️ WAF/Cloud Bypass**: It simulates real browser requests with custom payloads, effectively bypassing WAFs and protections.
-- **📝 Flexible Output**: Outputs results in JSON or plain text format, suitable for integration into CI/CD pipelines or manual review.
-- **🔧 Configurable Settings**: Adjustable rate limiting, timeouts, and worker counts to optimize scanning performance.
-- **🔄 Easy Updates**: Keep the tool up-to-date with the latest features and security patches using the `-u` or `--update` flag.
 - **🌐 Custom Headers**: Supports inclusion of custom HTTP headers to mimic specific client requests or bypass certain filters.
+- **🔧 Configurable Settings**: Adjustable rate limiting, timeouts, and worker counts to optimize scanning performance.
+- **📝 Flexible Output**: Outputs results in JSON or plain text format, suitable for integration into CI/CD pipelines or manual review.
 - **📂 Organized Scans**: Automatically organizes scan results into structured directories based on domains or URL lists.
+- **🔄 Easy Updates**: Keep the tool up-to-date with the latest features and security patches using the `-u` or `--update` flag.
 
 ## 📥 Kali Linux Installation - (Recommended)
 
@@ -240,5 +240,5 @@ Ensure that your use of this tool complies with all applicable local, national, 
 Whether you're a budding penetration tester aiming to enhance your skills or a seasoned professional seeking to uncover and mitigate security issues, LFier is here to support your journey in building a safer digital landscape.
 
 > [!NOTE]
-> Building a Safer Digital World. 🔒
+> Let’s build a safer web together! 🌐🔐
 
