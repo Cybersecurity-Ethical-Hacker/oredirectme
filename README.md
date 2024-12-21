@@ -141,7 +141,7 @@ Whenever you:
 - Open a New Terminal Window
 - Restart Your Computer
   
-You must activate the virtual environment before running XSSDynagen to ensure that all dependencies are correctly loaded.
+You must activate the virtual environment before running ORedirectMe to ensure that all dependencies are correctly loaded.
 
 
 ## 🧩 **URLs with Parameters**
