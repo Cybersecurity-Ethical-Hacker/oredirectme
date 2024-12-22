@@ -186,7 +186,7 @@ python oredirectme.py -d "https://domain.com/file.php?parameter=1234"
 ```
 💻 Scan multiple URLs with parameter(s) from a file with a custom rate limit:
 ```bash
-python oredirectme.py -l urls.txt -r 5
+python oredirectme.py -l urls.txt -r 15
 ```
 💻 Scan with custom payloads and increased timeout:
 ```bash
