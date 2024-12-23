@@ -9,6 +9,7 @@ import time
 import subprocess
 import platform
 import logging
+import psutil
 import argparse
 import random
 import json
@@ -29,9 +30,7 @@ from tqdm import tqdm
 
 init(autoreset=True)
 
-# ------------------------------------------------------------
 # Default Configuration Constants
-# ------------------------------------------------------------
 MAX_CONCURRENT_CONNECTIONS: int = 20
 DEFAULT_RATE_LIMIT: int = 100
 MAX_URL_LENGTH: int = 2083
@@ -47,9 +46,7 @@ VERSION: str = "0.0.1"
 GITHUB_REPOSITORY: str = "Cybersecurity-Ethical-Hacker/oredirectme"
 GITHUB_URL: str = f"https://github.com/{GITHUB_REPOSITORY}"
 
-# ------------------------------------------------------------
 # Version and Dependency Checks
-# ------------------------------------------------------------
 def get_playwright_version() -> str:
     try:
         import playwright
@@ -88,6 +85,36 @@ def check_playwright_version_installed() -> None:
     except Exception as e:
         print(f"{Fore.RED}Error during Playwright version check: {e}{Style.RESET_ALL}")
         sys.exit(1)
+
+class ConnectionPool:
+    def __init__(self, max_size: int = MAX_CONCURRENT_CONNECTIONS):
+        self.semaphore = asyncio.Semaphore(max_size)
+        self.active_connections: Set[str] = set()
+        self.lock = asyncio.Lock()
+        self.metrics: Dict[str, int] = {
+            'total_acquired': 0,
+            'total_released': 0,
+            'max_concurrent': 0
+        }
+
+    async def acquire(self, url: str) -> None:
+        await self.semaphore.acquire()
+        async with self.lock:
+            self.active_connections.add(url)
+            self.metrics['total_acquired'] += 1
+            self.metrics['max_concurrent'] = max(
+                self.metrics['max_concurrent'], 
+                len(self.active_connections)
+            )
+
+    async def release(self, url: str) -> None:
+        async with self.lock:
+            self.active_connections.discard(url)
+            self.metrics['total_released'] += 1
+        self.semaphore.release()
+
+    def get_metrics(self) -> Dict[str, int]:
+        return self.metrics.copy()
 
 # ------------------------------------------------------------
 # Logging Filters
@@ -231,10 +258,31 @@ class VersionInfo:
     current: str
     update_available: str
 
+class URLCache:
+    def __init__(self, max_size: int = 1000):
+        self.max_size = max_size
+        self._cache: Dict[str, str] = {}
+        self._lock = asyncio.Lock()
+    
+    async def get(self, key: str) -> Optional[str]:
+        async with self._lock:
+            return self._cache.get(key)
+    
+    async def set(self, key: str, value: str) -> None:
+        async with self._lock:
+            if len(self._cache) >= self.max_size:
+                # Remove oldest 20% of entries
+                remove_count = int(self.max_size * 0.2)
+                for _ in range(remove_count):
+                    self._cache.pop(next(iter(self._cache)))
+            self._cache[key] = value
+
 # ------------------------------------------------------------
 # URL Validation and Normalization
 # ------------------------------------------------------------
 class URLValidator:
+    _url_cache = URLCache()
+
     @staticmethod
     def validate_url(url: str) -> Tuple[bool, Optional[str]]:
         try:
@@ -270,19 +318,26 @@ class URLValidator:
             normalized += f"?{normalized_query}"
         return normalized
 
-def normalize_url_structure(url: str) -> str:
-    try:
-        parsed = urlparse(url)
-        params = parse_qs(parsed.query, keep_blank_values=True)
-        normalized_params = []
-        for key in sorted(params.keys()):
-            normalized_params.append((key, ""))
-        normalized_query = urlencode(normalized_params, doseq=True)
-        return parsed._replace(query=normalized_query).geturl()
-    except Exception:
-        return url
+    @staticmethod
+    async def normalize_url_structure(url: str) -> str:
+        cached = await URLValidator._url_cache.get(url)
+        if cached:
+            return cached
+            
+        try:
+            parsed = urlparse(url)
+            params = parse_qs(parsed.query, keep_blank_values=True)
+            normalized_params = []
+            for key in sorted(params.keys()):
+                normalized_params.append((key, ""))
+            normalized_query = urlencode(normalized_params, doseq=True)
+            result = parsed._replace(query=normalized_query).geturl()
+            await URLValidator._url_cache.set(url, result)
+            return result
+        except Exception:
+            return url
 
-def filter_urls(urls: Union[str, List[str]]) -> List[str]:
+async def filter_urls(urls: Union[str, List[str]]) -> List[str]:
     if isinstance(urls, str):
         urls = [urls]
     filtered: List[str] = []
@@ -295,7 +350,7 @@ def filter_urls(urls: Union[str, List[str]]) -> List[str]:
         if not is_valid:
             logging.error(f"Invalid URL skipped - {url}: {error}")
             continue
-        url_structure = normalize_url_structure(url)
+        url_structure = await URLValidator.normalize_url_structure(url)
         if url_structure in seen_structures:
             continue
         normalized_url = URLValidator.normalize_url(url)
@@ -407,7 +462,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument('-w', '--workers', type=int, default=10, help='Maximum number of concurrent workers')
     parser.add_argument('-r', '--rate', type=int, default=DEFAULT_RATE_LIMIT, 
                        help='Request rate limit')
-    parser.add_argument('-t', '--timeout', type=int, default=8, help='Total request timeout in seconds')
+    parser.add_argument('-t', '--timeout', type=int, default=DEFAULT_TIMEOUT, help=f'Total request timeout in seconds (default: {DEFAULT_TIMEOUT})')
     parser.add_argument('-j', '--json', action='store_true', help='Output results in JSON format')
     parser.add_argument('-H', '--header', action='append', help='Custom headers, multiple times. Format: "Header: Value"')
     args = parser.parse_args()
@@ -739,7 +794,14 @@ class Config:
         self.custom_headers_present: bool = False
         self.version_info: VersionInfo = self._check_version()
         self.additional_wait_time: int = 2
-
+        
+        # New configuration parameters
+        self.max_cache_size: int = 1000
+        self.cache_cleanup_threshold: float = 0.8
+        self.connection_pool_size: int = MAX_CONCURRENT_CONNECTIONS
+        self.enable_metrics: bool = True
+    
+        # Existing header processing
         custom_headers = {}
         self.custom_headers_present = False
         if args.header:
@@ -752,6 +814,8 @@ class Config:
                     print(f"{Fore.RED}Invalid header format: {header}. Must be 'HeaderName: HeaderValue'{Style.RESET_ALL}")
                     sys.exit(1)
         self.headers = HeaderManager.get_headers(custom_headers)
+        
+        # Directory and file setup
         self.base_dir: Path = self._setup_base_directory()
         self.base_dir.mkdir(parents=True, exist_ok=True)
         self.payload_file: Path = self._setup_payload_file(args.payloads)
@@ -916,6 +980,90 @@ class ParameterHandler:
         except Exception:
             return {}
 
+class PayloadProcessor:
+    def __init__(self, max_cache_size: int = 1000):
+        self._cache: Dict[str, List[Tuple[str, str, int]]] = {}
+        self._lock = asyncio.Lock()
+        self._max_cache_size = max_cache_size
+        
+    async def process_payloads(self, url: str, payloads: List[str]) -> List[Tuple[str, str, int]]:
+        cache_key = f"{url}:{hash(tuple(payloads))}"
+        
+        async with self._lock:
+            if cache_key in self._cache:
+                return self._cache[cache_key]
+            
+            if len(self._cache) >= self._max_cache_size:
+                # Remove oldest 20% of entries
+                remove_count = int(self._max_cache_size * 0.2)
+                for _ in range(remove_count):
+                    self._cache.pop(next(iter(self._cache)))
+            
+            results = []
+            parsed_url = urlparse(url)
+            query_params = parse_qs(parsed_url.query, keep_blank_values=True)
+            
+            for line_num, payload in enumerate(payloads, start=1):
+                for key in query_params:
+                    modified_params = query_params.copy()
+                    modified_params[key] = [payload]
+                    new_query = urlencode(modified_params, doseq=True, safe='/:?=&%')
+                    new_url = parsed_url._replace(query=new_query).geturl()
+                    results.append((key, new_url, line_num))
+            
+            self._cache[cache_key] = results
+            return results
+
+class ResourceManager:
+    def __init__(self):
+        self.active_resources: Dict[str, Any] = {}
+        self.resource_lock = asyncio.Lock()
+        
+    async def register(self, resource_id: str, resource: Any) -> None:
+        async with self.resource_lock:
+            if resource_id in self.active_resources:
+                try:
+                    await self.active_resources[resource_id].close()
+                except Exception:
+                    pass
+            self.active_resources[resource_id] = resource
+            
+    async def cleanup(self) -> None:
+        async with self.resource_lock:
+            for resource in self.active_resources.values():
+                try:
+                    if hasattr(resource, 'close'):
+                        await resource.close()
+                except Exception:
+                    pass
+            self.active_resources.clear()
+
+class PerformanceMetrics:
+    def __init__(self):
+        self.metrics: Dict[str, Any] = {
+            'start_time': None,
+            'end_time': None,
+            'total_urls': 0,
+            'total_parameters': 0,
+            'total_payloads': 0,
+            'successful_payloads': 0,
+            'errors': 0,
+            'memory_usage': [],
+            'connection_pool_metrics': {},
+        }
+        self._lock = asyncio.Lock()
+    
+    async def record_metric(self, metric_name: str, value: Any) -> None:
+        async with self._lock:
+            self.metrics[metric_name] = value
+    
+    async def update_counter(self, counter_name: str, increment: int = 1) -> None:
+        async with self._lock:
+            self.metrics[counter_name] = self.metrics.get(counter_name, 0) + increment
+    
+    def get_metrics(self) -> Dict[str, Any]:
+        return self.metrics.copy()
+
 # ------------------------------------------------------------
 # Redirect Scanner
 # ------------------------------------------------------------
@@ -931,6 +1079,9 @@ class RedirectScanner:
             'current_test': 0,
             'total_tests': 0
         }
+        self.metrics = PerformanceMetrics()
+        self.resource_manager = ResourceManager()
+        self.payload_processor = PayloadProcessor()
         self.progress_lock: asyncio.Lock = asyncio.Lock()
         self.results_lock: asyncio.Lock = asyncio.Lock()
         self.print_lock: asyncio.Lock = asyncio.Lock()
@@ -946,7 +1097,7 @@ class RedirectScanner:
         self.playwright: Optional[Any] = None
         self.browser: Optional[Browser] = None
         self.rate_limiter: asyncio.Semaphore = asyncio.Semaphore(self.config.rate_limit)
-        self.connection_pool: asyncio.Semaphore = asyncio.Semaphore(MAX_CONCURRENT_CONNECTIONS)
+        self.connection_pool = ConnectionPool(MAX_CONCURRENT_CONNECTIONS)
         self.context_pool: List[BrowserContext] = []
         self.max_contexts: int = min(config.max_workers, 10)
         self.page_pools: List[PagePool] = []
@@ -985,23 +1136,49 @@ class RedirectScanner:
             self.domain_cache[url] = parsed.hostname or ""
         return self.domain_cache[url]
 
-    async def initialize_browser_pool(self) -> None:
-        self.playwright = await async_playwright().start()
-        self.browser = await self.playwright.chromium.launch(
-            headless=True,
-            args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+    async def _init_single_context(self) -> Tuple[BrowserContext, PagePool]:
+        context = await self.browser.new_context(
+            extra_http_headers=self.config.headers,
+            viewport={'width': 1280, 'height': 800},
+            user_agent=self.config.headers.get('User-Agent'),
+            ignore_https_errors=True
         )
-        for _ in range(self.max_contexts):
-            context = await self.browser.new_context(
-                extra_http_headers=self.config.headers,
-                viewport={'width': 1280, 'height': 800},
-                user_agent=self.config.headers.get('User-Agent'),
-                ignore_https_errors=True
+        pool = PagePool(context, size=5)
+        await pool.initialize()
+        return context, pool
+
+    async def initialize_browser_pool(self) -> None:
+        try:
+            self.playwright = await async_playwright().start()
+            await self.resource_manager.register('playwright', self.playwright)
+            
+            self.browser = await self.playwright.chromium.launch(
+                headless=True,
+                args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
             )
-            pool = PagePool(context, size=5)
-            await pool.initialize()
-            self.page_pools.append(pool)
-            self.context_pool.append(context)
+            await self.resource_manager.register('browser', self.browser)
+    
+            # Initialize contexts in parallel
+            context_tasks = [
+                self._init_single_context() 
+                for _ in range(self.max_contexts)
+            ]
+            
+            contexts_and_pools = await asyncio.gather(*context_tasks)
+            
+            for i, (context, pool) in enumerate(contexts_and_pools):
+                self.page_pools.append(pool)
+                self.context_pool.append(context)
+                await self.resource_manager.register(f'context_{i}', context)
+                
+        except Exception as e:
+            logging.error(f"Failed to initialize browser pool: {str(e)}")
+            if self.playwright:
+                try:
+                    await self.resource_manager.cleanup()
+                except Exception as cleanup_error:
+                    logging.error(f"Error during cleanup: {str(cleanup_error)}")
+            raise
 
     async def rate_limit(self) -> None:
         async with self.rate_limiter:
@@ -1083,65 +1260,98 @@ class RedirectScanner:
     async def process_url(self, url: str, payloads: List[str]) -> None:
         if not self.running or url in self.processed_urls:
             return
+            
+        # Update metrics for total URLs processed
+        await self.metrics.update_counter('total_urls')
+        
         is_valid, error = URLValidator.validate_url(url)
         if not is_valid:
             logging.error(f"Invalid URL skipped - {url}: {error}")
             return
+            
         url = URLValidator.normalize_url(url)
         hostname = self.get_cached_domain(url)
-        await self.connection_pool.acquire()
+        
+        await self.connection_pool.acquire(url)
         try:
             pool = self.page_pools[hash(url) % len(self.page_pools)]
             page = await pool.get_page()
             try:
-                payloaded_urls = self.construct_payloaded_urls(url, payloads)
-                for param, payloaded_url, line_num in payloaded_urls:
+                processed_payloads = await self.payload_processor.process_payloads(url, payloads)
+                for param, payloaded_url, line_num in processed_payloads:
                     if not self.running:
                         break
+                        
                     if (hostname, param) in self.discovered_vulnerabilities:
                         async with self.progress_lock:
                             self.stats['current_test'] += 1
                             if self.running and self.pbar:
                                 self.pbar.update(1)
+                            await self.metrics.update_counter('skipped_tests')
                         continue
+                        
                     await self.rate_limit()
                     try:
                         is_redirect, final_url = await self.validate_redirection(page, payloaded_url)
                         if is_redirect and final_url:
                             await self._handle_vulnerability(url, param, line_num, payloaded_url, final_url)
                             self.discovered_vulnerabilities.add((hostname, param))
+                            await self.metrics.update_counter('successful_payloads')
+                        
                         async with self.progress_lock:
                             self.stats['current_test'] += 1
                             if self.running and self.pbar:
                                 self.pbar.update(1)
+                            await self.metrics.update_counter('total_tests')
+                                
                     except asyncio.CancelledError:
                         raise
                     except PlaywrightError as e:
                         async with self.progress_lock:
                             self.stats['errors'] += 1
+                            await self.metrics.update_counter('errors')
                         logging.error(f"Playwright error payload {line_num} URL {url}: {str(e)}")
                     except Exception as e:
                         async with self.progress_lock:
                             self.stats['errors'] += 1
+                            await self.metrics.update_counter('errors')
                         logging.error(f"Error payload {line_num} URL {url}: {str(e)}")
             finally:
                 await pool.return_page(page)
         except asyncio.CancelledError:
             raise
         except PlaywrightError as e:
+            await self.metrics.update_counter('errors')
             logging.error(f"Playwright error URL {url}: {str(e)}")
         except Exception as e:
+            await self.metrics.update_counter('errors')
             logging.error(f"Error URL {url}: {str(e)}")
         finally:
-            self.connection_pool.release()
+            await self.connection_pool.release(url)
             self.processed_urls.add(url)
+            
+            # Update final metrics for this URL
+            async with self.progress_lock:
+                await self.metrics.record_metric('memory_usage', psutil.Process().memory_info().rss)
+                await self.metrics.record_metric('connection_pool_metrics', 
+                    self.connection_pool.get_metrics())
 
-    def construct_payloaded_urls(self, base_url: str, payloads: List[str]) -> List[Tuple[str, str, int]]:
+    async def construct_payloaded_urls(self, base_url: str, payloads: List[str]) -> List[Tuple[str, str, int]]:
+        cache_key = f"{base_url}:{hash(tuple(payloads))}"
+        
+        # Check cache first
+        cached_result = await self.payload_processor._cache.get(cache_key)
+        if cached_result:
+            return cached_result
+
+        # If not in cache, construct the URLs
         parsed_url = urlparse(base_url)
         query_params = parse_qs(parsed_url.query, keep_blank_values=True)
         if not query_params:
             return []
+            
         payloaded_urls: List[Tuple[str, str, int]] = []
+        
         for line_num, payload in enumerate(payloads, start=1):
             for key in query_params:
                 modified_params = query_params.copy()
@@ -1149,6 +1359,9 @@ class RedirectScanner:
                 new_query = urlencode(modified_params, doseq=True, safe='/:?=&%')
                 new_url = parsed_url._replace(query=new_query).geturl()
                 payloaded_urls.append((key, new_url, line_num))
+        
+        # Store in cache before returning
+        await self.payload_processor._cache.set(cache_key, payloaded_urls)
         return payloaded_urls
 
     def calculate_total_tests(self, urls: List[str], payloads: List[str]) -> int:
@@ -1342,7 +1555,7 @@ async def cleanup_scanner(scanner: RedirectScanner) -> None:
 # ------------------------------------------------------------
 async def run_scan(scanner: RedirectScanner, urls: List[str], payloads: List[str]) -> None:
     try:
-        urls = filter_urls(urls)
+        urls = await filter_urls(urls)  # Added await here
         if not urls:
             print(f"\n{Fore.YELLOW}No valid URLs with parameters found to scan.{Style.RESET_ALL}")
             return
