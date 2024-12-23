@@ -264,6 +264,8 @@ Trigger a test notification from ORedirectMe to ensure everything is working cor
 
 You should receive a real-time alert in your Telegram group.
 
+![oredirectme2](https://github.com/user-attachments/assets/7c60f1b9-d1b8-412d-a1eb-e736ea18a7b4)
+
 
 ## 🛠️ Troubleshooting
 
