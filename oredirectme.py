@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import sys
 import asyncio
+import aiohttp
 import time
 import subprocess
 import platform
@@ -36,6 +37,12 @@ DEFAULT_RATE_LIMIT: int = 100
 MAX_URL_LENGTH: int = 2083
 MAX_PARAM_LENGTH: int = 1000
 DEFAULT_TIMEOUT: int = 5
+
+# Telegram Configuration
+TELEGRAM_BOT_TOKEN: str = ""
+TELEGRAM_CHAT_ID: str = ""
+TELEGRAM_NOTIFICATIONS_ENABLED: bool = False
+
 VERSION: str = "0.0.1"
 GITHUB_REPOSITORY: str = "Cybersecurity-Ethical-Hacker/oredirectme"
 GITHUB_URL: str = f"https://github.com/{GITHUB_REPOSITORY}"
@@ -945,6 +952,33 @@ class RedirectScanner:
         self.page_pools: List[PagePool] = []
         self.cached_payloads: Optional[List[str]] = None
 
+    async def send_telegram_notification(self, message: str) -> None:
+        """Send notification to Telegram if enabled."""
+        if not TELEGRAM_NOTIFICATIONS_ENABLED or not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+            return
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                telegram_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+                message = (message.replace('<', '&lt;')
+                                .replace('>', '&gt;')
+                                .replace('&', '&amp;')
+                                .replace('"', '&quot;')
+                                .replace("'", '&#39;'))
+                
+                params = {
+                    'chat_id': TELEGRAM_CHAT_ID,
+                    'text': message,
+                    'parse_mode': 'HTML'
+                }
+                
+                async with session.post(telegram_url, json=params) as response:
+                    if response.status != 200:
+                        error_msg = await response.text()
+                        logging.error(f"Telegram notification error: {error_msg}")
+        except Exception as e:
+            logging.error(f"Telegram notification error: {str(e)}")
+
     def get_cached_domain(self, url: str) -> str:
         if url not in self.domain_cache:
             parsed = urlparse(url)
@@ -1013,6 +1047,19 @@ class RedirectScanner:
             f"Parameter: {Fore.YELLOW}{param}{Style.RESET_ALL}  |  "
             f"Payload #{Fore.YELLOW}{line_num}{Style.RESET_ALL}"
         )
+
+        # Prepare and send Telegram notification
+        notification_message = (
+            f"🎯 Open Redirect Vulnerability Found!\n\n"
+            f"🌐 Domain: {hostname}\n"
+            f"📝 Parameter: {param}\n"
+            f"💉 Payload: #{line_num}\n"
+            f"🔗 Original URL: {url}\n"
+            f"📍 Redirected to: {final_url}\n"
+            f"🕒 Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        )
+        await self.send_telegram_notification(notification_message)
+
         async with self.results_lock:
             self.results.append("Open redirect found:")
             self.results.append(f"Domain: {hostname}")
