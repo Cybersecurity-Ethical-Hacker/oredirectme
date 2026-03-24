@@ -230,7 +230,7 @@ Git is not installed. To install Git:
    sudo pacman -S git
 After installation, restart your terminal.
 """
-            except:
+            except Exception:
                 pass
             return """
 Git is not installed. Please install using your distro's package manager:
@@ -301,7 +301,7 @@ class URLValidator:
     def normalize_url(url: str) -> str:
         parsed = urlparse(url)
         netloc = parsed.netloc.lower()
-        path = parsed.path.lower().rstrip('/')
+        path = parsed.path.rstrip('/')
         if not path:
             path = '/'
         if parsed.query:
@@ -365,8 +365,8 @@ async def filter_urls(urls: Union[str, List[str]]) -> List[str]:
 # ------------------------------------------------------------
 async def load_file_async(file_path: str) -> List[str]:
     try:
-        with open(file_path, 'r') as f:
-            content = f.read()
+        loop = asyncio.get_event_loop()
+        content = await loop.run_in_executor(None, Path(file_path).read_text)
         return [line.strip() for line in content.split('\n') if line.strip()]
     except FileNotFoundError:
         print(f"\n{Fore.RED}Error: File not found - {file_path}{Style.RESET_ALL}")
@@ -446,8 +446,8 @@ def parse_arguments() -> argparse.Namespace:
         description="",
         epilog=(
             "Examples:\n"
-            "  python oredirectmegpt.py -d \"https://example.com/page.php?param1=value1&param2=value2\"\n"
-            "  python oredirectmegpt.py -l urls.txt"
+            "  python oredirectme.py -d \"https://example.com/page.php?param1=value1&param2=value2\"\n"
+            "  python oredirectme.py -l urls.txt"
         )
     )
     parser.add_argument('-u', '--update', action='store_true',
@@ -602,7 +602,7 @@ class Updater:
                 )
                 if check_branch.returncode == 0:
                     return branch
-        except:
+        except Exception:
             pass
         return 'main'
 
@@ -624,7 +624,7 @@ class AutoUpdater(Updater):
                     cwd=self.repo_path
                 )
             return True
-        except:
+        except Exception:
             return False
 
     def _get_local_version(self) -> str:
@@ -644,7 +644,7 @@ class AutoUpdater(Updater):
             if result.returncode == 0:
                 return result.stdout.strip().lstrip('v')
             return self.current_version
-        except:
+        except Exception:
             return self.current_version
 
     def _detect_default_branch(self) -> Optional[str]:
@@ -666,7 +666,7 @@ class AutoUpdater(Updater):
                     cwd=self.repo_path
                 )
                 return result.stdout.strip() or 'main'
-        except:
+        except Exception:
             return 'main'
 
     def _get_remote_changes(self) -> Tuple[bool, str]:
@@ -689,7 +689,7 @@ class AutoUpdater(Updater):
                 )
                 if fetch_result.returncode != 0:
                     return False, "Check skipped"
-        except:
+        except Exception:
             return False, "Check skipped"
         try:
             with open(os.devnull, 'w') as devnull:
@@ -710,7 +710,7 @@ class AutoUpdater(Updater):
                     return True, remote_version
                 else:
                     return False, local_version
-        except:
+        except Exception:
             return False, "Check skipped"
 
     def _run_git_command(self, command: List[str]) -> Optional[str]:
@@ -732,7 +732,7 @@ class AutoUpdater(Updater):
                     cwd=self.repo_path
                 )
             return result.stdout.strip()
-        except:
+        except Exception:
             return None
 
     def _perform_update(self) -> Dict[str, Any]:
@@ -793,7 +793,7 @@ class Config:
         self.max_workers: int = args.workers
         self.custom_headers_present: bool = False
         self.version_info: VersionInfo = self._check_version()
-        self.additional_wait_time: int = 2
+        self.additional_wait_time: int = 1
         
         # New configuration parameters
         self.max_cache_size: int = 1000
@@ -840,7 +840,7 @@ class Config:
             )
             if result.returncode == 0:
                 return result.stdout.strip().lstrip('v')
-        except:
+        except Exception:
             pass
         return None
 
@@ -942,17 +942,32 @@ class PagePool:
             await self.pages.put(page)
 
     async def get_page(self) -> Page:
-        return await self.pages.get()
+        page = await self.pages.get()
+        try:
+            if page.is_closed():
+                page = await self.context.new_page()
+        except Exception:
+            page = await self.context.new_page()
+        return page
 
     async def return_page(self, page: Page):
+        try:
+            if page.is_closed():
+                page = await self.context.new_page()
+        except Exception:
+            try:
+                page = await self.context.new_page()
+            except Exception:
+                return
         await self.pages.put(page)
 
     async def cleanup(self):
         while not self.pages.empty():
             try:
-                page = await self.pages.get_nowait()
-                await page.close()
-            except:
+                page = self.pages.get_nowait()
+                if not page.is_closed():
+                    await page.close()
+            except Exception:
                 pass
 
 # ------------------------------------------------------------
@@ -1111,9 +1126,9 @@ class RedirectScanner:
         try:
             async with aiohttp.ClientSession() as session:
                 telegram_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-                message = (message.replace('<', '&lt;')
+                message = (message.replace('&', '&amp;')
+                                .replace('<', '&lt;')
                                 .replace('>', '&gt;')
-                                .replace('&', '&amp;')
                                 .replace('"', '&quot;')
                                 .replace("'", '&#39;'))
                 
@@ -1131,10 +1146,15 @@ class RedirectScanner:
             logging.error(f"Telegram notification error: {str(e)}")
 
     def get_cached_domain(self, url: str) -> str:
-        if url not in self.domain_cache:
-            parsed = urlparse(url)
-            self.domain_cache[url] = parsed.hostname or ""
-        return self.domain_cache[url]
+        parsed = urlparse(url)
+        hostname = (parsed.hostname or "").lower()
+        if hostname not in self.domain_cache:
+            domain_info = tldextract.extract(hostname)
+            if domain_info.domain and domain_info.suffix:
+                self.domain_cache[hostname] = f"{domain_info.domain}.{domain_info.suffix}"
+            else:
+                self.domain_cache[hostname] = hostname
+        return self.domain_cache[hostname]
 
     async def _init_single_context(self) -> Tuple[BrowserContext, PagePool]:
         context = await self.browser.new_context(
@@ -1188,17 +1208,29 @@ class RedirectScanner:
         if not self.running or url in self.failed_urls:
             return False, None
         try:
-            initial_url = url
-            initial_registered_domain = self.get_cached_domain(initial_url)
+            initial_registered_domain = self.get_cached_domain(url)
+            if not initial_registered_domain:
+                return False, None
+
             await page.goto(
                 url,
                 timeout=self.config.timeout,
                 wait_until='networkidle',
                 referer=self.config.headers.get('Referer', 'https://www.google.com')
             )
+
+            if self.config.additional_wait_time > 0:
+                await asyncio.sleep(self.config.additional_wait_time)
+
             final_url = page.url
-            if final_url != initial_url:
+
+            if not final_url or final_url.startswith(('about:', 'chrome-error:', 'data:', 'chrome:')):
+                return False, None
+
+            if final_url != url:
                 final_registered_domain = self.get_cached_domain(final_url)
+                if not final_registered_domain:
+                    return False, None
                 if initial_registered_domain != final_registered_domain:
                     return True, final_url
         except PlaywrightError:
@@ -1335,34 +1367,6 @@ class RedirectScanner:
                 await self.metrics.record_metric('memory_usage', psutil.Process().memory_info().rss)
                 await self.metrics.record_metric('connection_pool_metrics', 
                     self.connection_pool.get_metrics())
-
-    async def construct_payloaded_urls(self, base_url: str, payloads: List[str]) -> List[Tuple[str, str, int]]:
-        cache_key = f"{base_url}:{hash(tuple(payloads))}"
-        
-        # Check cache first
-        cached_result = await self.payload_processor._cache.get(cache_key)
-        if cached_result:
-            return cached_result
-
-        # If not in cache, construct the URLs
-        parsed_url = urlparse(base_url)
-        query_params = parse_qs(parsed_url.query, keep_blank_values=True)
-        if not query_params:
-            return []
-            
-        payloaded_urls: List[Tuple[str, str, int]] = []
-        
-        for line_num, payload in enumerate(payloads, start=1):
-            for key in query_params:
-                modified_params = query_params.copy()
-                modified_params[key] = [payload]
-                new_query = urlencode(modified_params, doseq=True, safe='/:?=&%')
-                new_url = parsed_url._replace(query=new_query).geturl()
-                payloaded_urls.append((key, new_url, line_num))
-        
-        # Store in cache before returning
-        await self.payload_processor._cache.set(cache_key, payloaded_urls)
-        return payloaded_urls
 
     def calculate_total_tests(self, urls: List[str], payloads: List[str]) -> int:
         total_params = 0
@@ -1601,11 +1605,6 @@ def handle_exception(loop, context):
     except Exception as e:
         print(f"{Fore.RED}Error in exception handler: {e}{Style.RESET_ALL}")
 
-warnings.filterwarnings("ignore", message="There is no current event loop")
-loop = asyncio.new_event_loop()
-asyncio.set_event_loop(loop)
-loop.set_exception_handler(handle_exception)
-
 # ------------------------------------------------------------
 # Main Async Entry Point
 # ------------------------------------------------------------
@@ -1662,7 +1661,7 @@ async def main_async() -> None:
                 task.cancel()
             try:
                 await asyncio.wait(pending, timeout=1)
-            except:
+            except Exception:
                 pass
     except Exception as e:
         print(f"\n{Fore.RED}Error during scan: {str(e)}{Style.RESET_ALL}")
@@ -1671,11 +1670,11 @@ async def main_async() -> None:
     finally:
         try:
             await asyncio.shield(cleanup_scanner(scanner))
-        except:
+        except Exception:
             pass
         try:
             scanner.print_final_stats()
-        except:
+        except Exception:
             pass
 
 # ------------------------------------------------------------
@@ -1695,7 +1694,7 @@ def main() -> None:
     finally:
         try:
             loop.close()
-        except:
+        except Exception:
             pass
         sys.exit(0)
 

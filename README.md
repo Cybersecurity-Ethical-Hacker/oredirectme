@@ -208,7 +208,7 @@ python oredirectme.py --update
 - If JSON output is enabled (-j flag), results include detailed scan summaries and vulnerabilities found.
 
 ## 🐛 Error Handling
-- Graceful Exception Handling: The tool gracefully handles exceptions and logs errors to redirect_scanner.log.
+- Graceful Exception Handling: The tool gracefully handles exceptions and logs errors to logs/oredirectme.log.
 - Informative Messages: Provides clear messages if payload files or URL lists are not found.
 - Interruption Support: Supports interruption via Ctrl+C, safely stopping the scan and providing a summary.
 
@@ -313,7 +313,7 @@ If you discover any vulnerabilities using this tool, report them responsibly to 
 Ensure that your use of this tool complies with all applicable local, national, and international laws and regulations.
 
 ## 📚 Learn and Grow
-Whether you're a budding penetration tester aiming to enhance your skills or a seasoned professional seeking to uncover and mitigate security issues, LFier is here to support your journey in building a safer digital landscape.
+Whether you're a budding penetration tester aiming to enhance your skills or a seasoned professional seeking to uncover and mitigate security issues, ORedirectMe is here to support your journey in building a safer digital landscape.
 
 > [!NOTE]
 > Let’s build a safer web together! 🌐🔐
