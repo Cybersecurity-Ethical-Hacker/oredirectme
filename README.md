@@ -250,7 +250,9 @@ https://api.telegram.org/bot<YOUR_BOT_TOKEN>/getUpdates
 Example: TELEGRAM_CHAT_ID = "your_chat_id_here"
 ```
 
-🛠️ Update ORedirectMe
+5.🛠️ Configure the Telegram Variables in `oredirectme.py`
+
+- Open `oredirectme.py` and update the Telegram configuration constants at the top of the file:
 
 ```bash
 TELEGRAM_BOT_TOKEN = "your_bot_token_here ex: 7926311985:ABH04MhskQg-HzSgYrqQVGFz6q1I2AgykNA"
@@ -258,7 +260,7 @@ TELEGRAM_CHAT_ID = "your_chat_id_here ex: -12345678"
 TELEGRAM_NOTIFICATIONS_ENABLED = True
 ```
 
-🚀 Test the Setup
+6.🚀 Test the Setup
 
 Trigger a test notification from ORedirectMe to ensure everything is working correctly.
 
