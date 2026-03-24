@@ -42,7 +42,7 @@ TELEGRAM_BOT_TOKEN: str = ""
 TELEGRAM_CHAT_ID: str = ""
 TELEGRAM_NOTIFICATIONS_ENABLED: bool = False
 
-VERSION: str = "0.0.1"
+VERSION: str = "0.0.2"
 GITHUB_REPOSITORY: str = "Cybersecurity-Ethical-Hacker/oredirectme"
 GITHUB_URL: str = f"https://github.com/{GITHUB_REPOSITORY}"
 
